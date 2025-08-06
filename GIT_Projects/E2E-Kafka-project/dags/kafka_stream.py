@@ -1,11 +1,10 @@
-import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 
 default_args = {
     'owner': 'airscholar',
-    'start_date': datetime(2023, 9, 3, 10, 00)
+    'start_date': datetime.today() - timedelta(days=1)
 }
 
 def get_data():
@@ -20,7 +19,6 @@ def get_data():
 def format_data(res):
     data = {}
     location = res['location']
-    data['id'] = uuid.uuid4()
     data['first_name'] = res['name']['first']
     data['last_name'] = res['name']['last']
     data['gender'] = res['gender']
@@ -41,32 +39,30 @@ def stream_data():
     from kafka import KafkaProducer
     import time
     import logging
-    import sys
 
     logging.basicConfig(level=logging.INFO)
-    print("Starting Kafka producer...")  # DEBUG
-    sys.stdout.flush()
 
     producer = KafkaProducer(bootstrap_servers=['broker:29092'], max_block_ms=5000)
     curr_time = time.time()
 
     while True:
-        if time.time() > curr_time + 10:  # 10 seconds for test
+        if time.time() > curr_time + 60:
             break
         try:
             res = get_data()
             res = format_data(res)
-            print(f"Sending: {res}")  # DEBUG
-            sys.stdout.flush()
+            logging.info(f"Sending to Kafka: {res}")
             producer.send('users_created', json.dumps(res).encode('utf-8'))
         except Exception as e:
-            logging.error(f'Kafka error: {e}')
+            logging.error(f'An error occurred: {e}')
             continue
 
+    producer.flush()  # <- ensures messages are sent
+    producer.close()  # <- good practice
 
 with DAG('user_automation',
          default_args=default_args,
-         schedule_interval='@daily',
+         schedule='@daily',
          catchup=False) as dag:
 
     streaming_task = PythonOperator(
